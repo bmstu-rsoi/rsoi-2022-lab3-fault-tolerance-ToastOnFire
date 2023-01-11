@@ -117,7 +117,7 @@ gateway.get(path+'/rental', (request, response) => {
 							price: (resPayment[obj.payment_uid]).price
 						}
 					} else {
-						responseObj.payment = obj.payment_uid
+						responseObj.payment = {}
 					}
 					
 					responseArray.push(responseObj);
@@ -195,7 +195,7 @@ gateway.get(path+'/rental/:rentalUid', (request, response) => {
 						price: (resPayment[paymentUids[0]]).price
 					}
 				} else {
-					responseObj.payment = paymentUids[0]
+					responseObj.payment = {}
 				}
 				
 				response.status(200).json(responseObj);
