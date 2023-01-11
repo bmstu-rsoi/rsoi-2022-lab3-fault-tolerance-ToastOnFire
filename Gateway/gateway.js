@@ -19,10 +19,25 @@ gateway.use(bodyParser.urlencoded({
   extended: true
 })); 
 
+circuitBreakerObj = {
+	maxAttempts: 3,
+	cars: 0,
+	payment: 0,
+	rental: 0,
+	checkConnection: {
+		cars: undefined,
+		payment: undefined,
+		rental: undefined
+	},
+	requestQueue: new Array()
+}
+
 gateway.get('/manage/health', (request, response) => {
 	response.status(200).send();
 });
 
+
+// Список всех автомобилей
 gateway.get(path+'/cars', (request, response) => {
 	let carsParams = {
 		page: request.query.page,
@@ -34,9 +49,11 @@ gateway.get(path+'/cars', (request, response) => {
 		method: 'GET'
 	})
 	.then(result => result.json())
-    .then(data => response.status(200).json(data));
+    .then(data => response.status(200).json(data))
+	.catch(error => response.sendStatus(500));
 });
 
+// Получить информацию о всех арендах пользователя
 gateway.get(path+'/rental', (request, response) => {
 	let userName = {
 		username: request.header('X-User-Name')
@@ -55,53 +72,65 @@ gateway.get(path+'/rental', (request, response) => {
 			paymentUids.push(obj.payment_uid);
 		}
 		
-		Promise.all([
-			fetch(adress.cars+path+'/cars_by_uid', {
+		makeRequest(adress.cars+path+'/cars_by_uid', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({carsUidsArr: carsUids})
-			}),
-			fetch(adress.payment+path+'/payment_by_uid', {
+		}, 'cars')
+		.then(resCars => {
+			makeRequest(adress.payment+path+'/payment_by_uid', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({paymentUidsArr: paymentUids})
-			})
-		])
-		.then(resArr => {
-			return Promise.all(resArr.map(r => r.json()));
-		})
-		.then(resArrData => {
-			responseArray = [];
-			for(let obj of resData) {
-				let responseObj = {
-					rentalUid: obj.rental_uid,
-					status: obj.status,
-					dateFrom: obj.date_from,
-					dateTo: obj.date_to,
-					car: {
-						carUid: obj.car_uid,
-						brand: (resArrData[0][obj.car_uid]).brand,
-						model: (resArrData[0][obj.car_uid]).model,
-						registrationNumber: (resArrData[0][obj.car_uid]).registration_number
-					},
-					payment: {
-						paymentUid: obj.payment_uid,
-						status: (resArrData[1][obj.payment_uid]).status,
-						price: (resArrData[1][obj.payment_uid]).price
+			}, 'payment')
+			.then(resPayment => {
+				responseArray = [];
+				for(let obj of resData) {
+					let responseObj = {
+						rentalUid: obj.rental_uid,
+						status: obj.status,
+						dateFrom: obj.date_from,
+						dateTo: obj.date_to,
+						car: undefined,
+						payment: undefined
 					}
+					
+					if(resCars != 500) {
+						responseObj.car = {
+							carUid: obj.car_uid,
+							brand: (resCars[obj.car_uid]).brand,
+							model: (resCars[obj.car_uid]).model,
+							registrationNumber: (resCars[obj.car_uid]).registration_number
+						}
+					} else {
+						responseObj.car = obj.car_uid
+					}
+					
+					if(resPayment != 500) {
+						responseObj.payment =  {
+							paymentUid: obj.payment_uid,
+							status: (resPayment[obj.payment_uid]).status,
+							price: (resPayment[obj.payment_uid]).price
+						}
+					} else {
+						responseObj.payment = obj.payment_uid
+					}
+					
+					responseArray.push(responseObj);
 				}
-				responseArray.push(responseObj);
-			}
-			
-			response.status(200).json(responseArray);
+				
+				response.status(200).json(responseArray);
+			})
 		})
 	})
+	.catch(error => response.sendStatus(500))
 });
 
+// Информация о конкретной аренде пользователя
 gateway.get(path+'/rental/:rentalUid', (request, response) => {
 	let rentalParams = {
 		username: request.header('X-User-Name'),
@@ -123,49 +152,60 @@ gateway.get(path+'/rental/:rentalUid', (request, response) => {
 			response.status(404).json({message: 'Билет не найден'});
 		}
 		
-		Promise.all([
-			fetch(adress.cars+path+'/cars_by_uid', {
+		makeRequest(adress.cars+path+'/cars_by_uid', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({carsUidsArr: carsUids})
-			}),
-			fetch(adress.payment+path+'/payment_by_uid', {
+		}, 'cars')
+		.then(resCars => {
+			makeRequest(adress.payment+path+'/payment_by_uid', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({paymentUidsArr: paymentUids})
-			})
-		])
-		.then(resArr => {
-			return Promise.all(resArr.map(r => r.json()));
-		})
-		.then(resArrData => {
-			let responseObj = {
-				rentalUid: resData[0].rental_uid,
-				status: resData[0].status,
-				dateFrom: resData[0].date_from,
-				dateTo: resData[0].date_to,
-				car: {
-					carUid: carsUids[0],
-					brand: (resArrData[0][carsUids[0]]).brand,
-					model: (resArrData[0][carsUids[0]]).model,
-					registrationNumber: (resArrData[0][carsUids[0]]).registration_number
-				},
-				payment: {
-					paymentUid: paymentUids[0],
-					status: (resArrData[1][paymentUids[0]]).status,
-					price: (resArrData[1][paymentUids[0]]).price
+			}, 'payment')
+			.then(resPayment => {
+				let responseObj = {
+					rentalUid: resData[0].rental_uid,
+					status: resData[0].status,
+					dateFrom: resData[0].date_from,
+					dateTo: resData[0].date_to,
+					car: undefined,
+					payment: undefined
 				}
-			}
-			
-			response.status(200).json(responseObj);
+					
+				if(resCars != 500) {
+					responseObj.car = {
+						carUid: carsUids[0],
+						brand: (resCars[carsUids[0]]).brand,
+						model: (resCars[carsUids[0]]).model,
+						registrationNumber: (resCars[carsUids[0]]).registration_number
+					}
+				} else {
+					responseObj.car = carsUids[0]
+				}
+					
+				if(resPayment != 500) {
+					responseObj.payment =  {
+						paymentUid: paymentUids[0],
+						status: (resPayment[paymentUids[0]]).status,
+						price: (resPayment[paymentUids[0]]).price
+					}
+				} else {
+					responseObj.payment = paymentUids[0]
+				}
+				
+				response.status(200).json(responseObj);
+			})
 		})
 	})
+	.catch(error => response.sendStatus(500))
 });
 
+// Забронировать автомобиль
 gateway.post(path+'/rental', (request, response) => {
 	let rentalParams = {
 		rentalUid: uuidv4(),
@@ -212,6 +252,13 @@ gateway.post(path+'/rental', (request, response) => {
 						'Content-Type': 'application/json'
 					},
 					body: JSON.stringify(rentalParams)
+				})
+				.catch(rentalErr => {
+					let params = {
+						status: 503,
+						statusText: 'Rental offline'
+					}
+					return new Response(null, params);
 				}),
 				fetch(adress.payment+path+'/payment/add', {
 					method: 'POST',
@@ -219,6 +266,13 @@ gateway.post(path+'/rental', (request, response) => {
 						'Content-Type': 'application/json'
 					},
 					body: JSON.stringify(paymentParams)
+				})
+				.catch(paymentErr => {
+					let params = {
+						status: 503,
+						statusText: 'Payment offline'
+					}
+					return new Response(null, params);
 				})
 			]).then(resArr => {
 				if(resArr[0].status == 200 && resArr[1].status == 200) {
@@ -240,15 +294,33 @@ gateway.post(path+'/rental', (request, response) => {
 					
 					response.status(200).json(responseObj)
 				} else {
-					response.status(400).json({message: 'Ошибка: не получилось создать записи об аренде'})
+					fetch(adress.cars+path+'/free_car?'+new URLSearchParams({carUid: carsParams.carUid}), {
+						method: 'PUT'
+					});
+					
+					if (resArr[0].status == 503) {
+						fetch(adress.cars+path+'/payment/add/rollback?'+new URLSearchParams({paymentUid: paymentParams.paymentUid}), {
+							method: 'DELETE'
+						})
+						
+						response.status(503).json({message: 'Rental Service unavailable'})
+					} else if (resArr[1].status == 503) {
+						fetch(adress.cars+path+'/rental/add/rollback?'+new URLSearchParams({rentalUid: rentalParams.rentalUid}), {
+							method: 'DELETE'
+						})
+						
+						response.status(503).json({message: 'Payment Service unavailable'})
+					}
 				}
 			})
 		}  else {
 			response.status(400).json({message: 'Ошибка: Автомобиль уже забронирован'})
 		}
 	})
+	.catch(error => response.status(503).json({message: 'Cars is unavailable'}))
 });
 
+// Отмена аренды автомобиля
 gateway.delete(path+'/rental/:rentalUid', (request, response) => {
 	let rentalGetParams = {
 		username: request.header('X-User-Name'),
@@ -278,12 +350,34 @@ gateway.delete(path+'/rental/:rentalUid', (request, response) => {
 						'Content-Type': 'application/json'
 					},
 					body: JSON.stringify(rentalPutParams)
+				})
+				.catch(rentalErr => {
+					circuitBreakerObj.requestQueue.push(setInterval(fetch, 10000, adress.rental+path+'/change_status',
+					{
+						method: 'PUT',
+						headers: {
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify(rentalPutParams)
+					}))
 				}),
 				fetch(adress.cars+path+'/free_car?'+new URLSearchParams({carUid: resData.car_uid}), {
 					method: 'PUT'
+				})
+				.catch(carsErr => {
+					circuitBreakerObj.requestQueue.push(setInterval(fetch, 10000, adress.cars+path+'/free_car?'+new URLSearchParams({carUid: resData.car_uid}),
+					{
+					method: 'PUT'
+					}))
 				}),
 				fetch(adress.payment+path+'/cancel_payment?'+new URLSearchParams({paymentUid: resData.payment_uid}), {
 					method: 'PUT'
+				})
+				.catch(paymentErr => {
+					circuitBreakerObj.requestQueue.push(setInterval(fetch, 10000, adress.payment+path+'/cancel_payment?'+new URLSearchParams({paymentUid: resData.payment_uid}),
+					{
+					method: 'PUT'
+					}))
 				})
 			])
 			.then(putsRes => {
@@ -295,6 +389,7 @@ gateway.delete(path+'/rental/:rentalUid', (request, response) => {
 	})
 });
 
+// Завершение аренды автомобиля
 gateway.post(path+'/rental/:rentalUid/finish', (request, response) => {
 	let rentalGetParams = {
 		username: request.header('X-User-Name'),
@@ -341,3 +436,49 @@ gateway.post(path+'/rental/:rentalUid/finish', (request, response) => {
 gateway.listen(process.env.PORT || serverPortNumber, () => {
 	console.log('Gateway server works on port '+serverPortNumber);
 })
+
+function checkHealth(path, serverName) {
+	console.log(path)
+	console.log(serverName)
+	fetch(path + '/manage/health', {
+		method: 'GET'
+	})
+	.then(res => {
+		if (res.status == 200) {
+			console.log('Server ' + serverName + ' is online');
+			circuitBreakerObj[serverName] = 0;
+			clearInterval(circuitBreakerObj.checkConnection[serverName])
+		}
+	})
+	.catch(err => {
+		console.log('Server ' + serverName + ' is offline');
+	})
+}
+
+async function makeRequest(url, params, serverName) {
+	if (circuitBreakerObj[serverName] <= circuitBreakerObj.maxAttempts) {
+		const response = await fetch(url, params).catch(error => {
+			let params = {
+				status: 500,
+				statusText: 'Server offline'
+			}
+			return new Response(null, params);
+		});
+		
+		console.log(response.status)
+		if (response.status != 500) {
+			let result = await response.json();
+			return result;
+		} else {
+			circuitBreakerObj[serverName] += 1;
+			
+			if (circuitBreakerObj[serverName] > circuitBreakerObj.maxAttempts) {
+				circuitBreakerObj.checkConnection[serverName] = setInterval(checkHealth, 5000, adress[serverName], serverName);
+			}
+			
+			return 500;
+		}
+	} else {
+		return 500;
+	}
+}

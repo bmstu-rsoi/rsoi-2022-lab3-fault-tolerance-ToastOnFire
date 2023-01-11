@@ -90,6 +90,18 @@ rental.put(path+'/change_status', (request, response) => {
 		})
 });
 
+rental.delete(path+'/rental/add/rollback', (request, response) => {
+	let rollbackRentalQuery = `
+	DELETE FROM rental
+	WHERE rental_uid = $1;
+	`
+	
+	pool.query(rollbackRentalQuery, [request.query.rentalUid])
+	.then(res => {
+		response.sendStatus(200);
+	})
+});
+
 rental.listen(process.env.PORT || serverPortNumber, () => {
 	console.log('Rental server works on port '+serverPortNumber);
 })

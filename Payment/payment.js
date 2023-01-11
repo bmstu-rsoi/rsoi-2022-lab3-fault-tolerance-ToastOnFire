@@ -31,7 +31,7 @@ payment.get('/manage/health', (request, response) => {
 });
 
 payment.post(path+'/payment/add', (request, response) => {
-	let addRentalQuery = `
+	let addPaymentQuery = `
 	INSERT INTO payment (payment_uid, status, price) 
 	VALUES ($1, 'PAID', $2);
 	`
@@ -41,7 +41,7 @@ payment.post(path+'/payment/add', (request, response) => {
 	
 	let values = [request.body.paymentUid, Math.ceil(request.body.price*(Math.abs(dateTo.getTime() - dateFrom.getTime()) / (1000 * 3600 * 24)))]
 	
-	pool.query(addRentalQuery, values)
+	pool.query(addPaymentQuery, values)
 		.then(res => {
 			response.sendStatus(200);
 		}).catch(err => {
@@ -75,6 +75,18 @@ payment.put(path+'/cancel_payment', (request, response) => {
 			response.sendStatus(204);
 		})
 })
+
+payment.delete(path+'/payment/add/rollback', (request, response) => {
+	let rollbackPaymentQuery = `
+	DELETE FROM payment
+	WHERE payment_uid = $1;
+	`
+	
+	pool.query(rollbackPaymentQuery, [request.query.paymentUid])
+	.then(res => {
+		response.sendStatus(200);
+	})
+});
 
 payment.listen(process.env.PORT || serverPortNumber, () => {
 	console.log('Payment server works on port '+serverPortNumber);
